@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YouTube Inject Anti Pause",
-  "version": "12.2.0",
-  "description": "YouTube theme inject, focus mode, wallpaper, ad cleaner, and safe anti-pause. v12.2 storage quota fix.",
+  "version": "12.3.0",
+  "description": "YouTube theme inject, focus mode, wallpaper, ad cleaner, and safe anti-pause. v12.3 popup playlist color fix.",
   "permissions": [
     "unlimitedStorage",
     "storage",
