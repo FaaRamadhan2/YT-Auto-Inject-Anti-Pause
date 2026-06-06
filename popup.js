@@ -1,5 +1,5 @@
 /*
- * YT Auto Inject Anti Pause
+ * YouTube Focus Anti Pause Combo
  * Copyright (C) 2026 Faa Ramadhan
  *
  * This program is free software: you can redistribute it and/or modify
@@ -12,13 +12,12 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
-
 "use strict";
 
-const STORAGE_KEY = "ytInjectAntiPauseV12";
+const STORAGE_KEY = "ytFocusAntiPauseComboV13";
+const OLD_STORAGE_KEY = "ytInjectAntiPauseV12";
 const TARGET_URLS = ["https://youtube.com/*", "https://www.youtube.com/*", "https://music.youtube.com/*"];
 
 const DEFAULTS = {
@@ -49,7 +48,7 @@ const DEFAULTS = {
   customCss: ""
 };
 
-const PRESET_COLORS = {
+const PRESETS = {
   youtubeDefault: { accent: "#ff0000", bg: "#0f0f0f", text: "#f1f1f1" },
   darkRed: { accent: "#fb7185", bg: "#0f070a", text: "#fff1f4" },
   midnightBlue: { accent: "#60a5fa", bg: "#07111f", text: "#eef7ff" },
@@ -68,24 +67,20 @@ const FIELD_IDS = [
 
 const el = {};
 let current = { ...DEFAULTS };
-let liveTimer = null;
+let liveTimer = 0;
+let started = false;
 
-function qs(id) {
+function byId(id) {
   return document.getElementById(id);
 }
 
-function bootElements() {
-  for (const id of FIELD_IDS) el[id] = qs(id);
-  el.msg = qs("msg");
-  el.statusDot = qs("statusDot");
-  el.wallpaperFile = qs("wallpaperFile");
-  el.wallpaperName = qs("wallpaperName");
-}
-
 function setMsg(text, bad = false) {
-  if (!el.msg) return;
   el.msg.textContent = text;
   el.msg.style.color = bad ? "#fecdd3" : "#bae6fd";
+}
+
+function normalize(value) {
+  return { ...DEFAULTS, ...(value || {}) };
 }
 
 function isYouTubeUrl(url) {
@@ -99,9 +94,7 @@ async function getActiveYouTubeTab() {
 
 async function getYouTubeTabs() {
   const tabs = await chrome.tabs.query({ url: TARGET_URLS });
-  const unique = new Map();
-  for (const tab of tabs) if (tab.id && isYouTubeUrl(tab.url)) unique.set(tab.id, tab);
-  return [...unique.values()];
+  return [...new Map(tabs.filter(tab => tab.id && isYouTubeUrl(tab.url)).map(tab => [tab.id, tab])).values()];
 }
 
 function send(tabId, payload) {
@@ -118,23 +111,23 @@ async function inject(tabId) {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
     return true;
   } catch (error) {
-    console.warn("[YT-IAP] inject failed", error);
+    console.warn("[YT Focus Combo] inject failed", error);
     return false;
   }
 }
 
 async function applyToTab(tab, settings, force = false) {
   if (force) await inject(tab.id);
-  let result = await send(tab.id, { type: "YT_IAP_APPLY", settings });
+  let result = await send(tab.id, { type: "YT_FOCUS_COMBO_APPLY", settings });
   if (!result.ok) {
     if (!(await inject(tab.id))) return false;
     await new Promise(resolve => setTimeout(resolve, 180));
-    result = await send(tab.id, { type: "YT_IAP_APPLY", settings });
+    result = await send(tab.id, { type: "YT_FOCUS_COMBO_APPLY", settings });
   }
   return result.ok;
 }
 
-function read() {
+function readForm() {
   const settings = { ...current };
   for (const id of FIELD_IDS) {
     const node = el[id];
@@ -143,59 +136,54 @@ function read() {
     else if (node.type === "range") settings[id] = Number(node.value);
     else settings[id] = node.value;
   }
-  return settings;
+  return normalize(settings);
 }
 
-function write(settings) {
-  current = { ...DEFAULTS, ...(settings || {}) };
+function writeForm(settings) {
+  current = normalize(settings);
   for (const id of FIELD_IDS) {
     const node = el[id];
     if (!node) continue;
     if (node.type === "checkbox") node.checked = Boolean(current[id]);
     else node.value = current[id];
   }
-  if (el.wallpaperName) el.wallpaperName.textContent = current.wallpaperName ? `Local: ${current.wallpaperName}` : "No local wallpaper.";
-  el.statusDot?.classList.toggle("off", !current.enabled);
+  el.wallpaperName.textContent = current.wallpaperName ? `Local: ${current.wallpaperName}` : "No local wallpaper.";
+  el.statusDot.classList.toggle("off", !current.enabled);
 }
 
 async function save(settings) {
-  current = { ...DEFAULTS, ...settings };
-
+  current = normalize(settings);
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: current });
-    el.statusDot?.classList.toggle("off", !current.enabled);
+    el.statusDot.classList.toggle("off", !current.enabled);
     return true;
   } catch (error) {
     const message = String(error?.message || error || "");
-
     if (/quota|kQuotaBytes|QUOTA/i.test(message)) {
       current.wallpaperDataUrl = "";
       current.wallpaperName = "";
       current.wallpaperEnabled = false;
-
       await chrome.storage.local.set({ [STORAGE_KEY]: current }).catch(() => null);
-
-      write(current);
-      setMsg("Wallpaper too large for Chrome storage. Use smaller image / URL.", true);
+      writeForm(current);
+      setMsg("Wallpaper too large for Chrome storage.", true);
       return false;
     }
-
     setMsg(message || "Failed to save settings.", true);
     return false;
   }
 }
 
 async function applyActive(force = false) {
-  const settings = read();
+  const settings = readForm();
   if (!(await save(settings))) return;
   const tab = await getActiveYouTubeTab();
-  if (!tab) return setMsg("Open YouTube tab first.", true);
+  if (!tab) return setMsg("Open a YouTube tab first.", true);
   const ok = await applyToTab(tab, settings, force);
-  setMsg(ok ? "Applied." : "Apply failed. Reload extension + YouTube.", !ok);
+  setMsg(ok ? "Applied." : "Apply failed. Reload YouTube and try Force Inject.", !ok);
 }
 
 async function forceAll() {
-  const settings = read();
+  const settings = readForm();
   if (!(await save(settings))) return;
   const tabs = await getYouTubeTabs();
   let ok = 0;
@@ -206,7 +194,7 @@ async function forceAll() {
 function queueLive() {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(async () => {
-    const settings = read();
+    const settings = readForm();
     if (!(await save(settings))) return;
     const tab = await getActiveYouTubeTab();
     if (tab) await applyToTab(tab, settings, false);
@@ -214,11 +202,10 @@ function queueLive() {
 }
 
 function syncColors() {
-  const theme = el.theme?.value || "youtubeDefault";
-  const colors = PRESET_COLORS[theme] || PRESET_COLORS.youtubeDefault;
-  if (el.accent) el.accent.value = colors.accent;
-  if (el.bg) el.bg.value = colors.bg;
-  if (el.text) el.text.value = colors.text;
+  const preset = PRESETS[el.theme.value] || PRESETS.youtubeDefault;
+  el.accent.value = preset.accent;
+  el.bg.value = preset.bg;
+  el.text.value = preset.text;
 }
 
 function fileToDataUrl(file) {
@@ -242,118 +229,109 @@ function loadImage(src) {
 async function compressImage(file) {
   const maxRawBytes = 50 * 1024 * 1024;
   const maxStoredChars = 7 * 1024 * 1024;
-
-  if (file.size > maxRawBytes) {
-    throw new Error("Image too large. Use <= 50MB.");
-  }
-
+  if (file.size > maxRawBytes) throw new Error("Image too large. Use <= 50MB.");
   if (file.type === "image/svg+xml" || file.type === "image/gif") {
     const dataUrl = await fileToDataUrl(file);
-
-    if (dataUrl.length > maxStoredChars) {
-      throw new Error("GIF/SVG too large for safe storage. Use JPG/PNG/WebP.");
-    }
-
+    if (dataUrl.length > maxStoredChars) throw new Error("GIF/SVG too large for storage.");
     return dataUrl;
   }
 
-  const originalDataUrl = await fileToDataUrl(file);
-  const img = await loadImage(originalDataUrl);
-
+  const img = await loadImage(await fileToDataUrl(file));
   const canvas = document.createElement("canvas");
-  let maxSide = 2560;
-
-  while (maxSide >= 1280) {
+  for (let maxSide = 2560; maxSide >= 1280; maxSide -= 320) {
     const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
     canvas.width = Math.max(1, Math.round(img.width * scale));
     canvas.height = Math.max(1, Math.round(img.height * scale));
-
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
     for (const quality of [0.86, 0.78, 0.7, 0.62, 0.54, 0.46, 0.38]) {
       const output = canvas.toDataURL("image/jpeg", quality);
-
-      if (output.length <= maxStoredChars) {
-        return output;
-      }
+      if (output.length <= maxStoredChars) return output;
     }
-
-    maxSide -= 320;
   }
-
-  throw new Error("Compressed image still too large. Use smaller wallpaper.");
+  throw new Error("Compressed image still too large.");
 }
 
 function bindEvents() {
-  qs("apply")?.addEventListener("click", () => applyActive(false));
-  qs("force")?.addEventListener("click", () => forceAll());
-  qs("reset")?.addEventListener("click", async () => { write(DEFAULTS); await applyActive(true); });
-  qs("reloadTabs")?.addEventListener("click", async () => {
+  byId("apply").addEventListener("click", () => applyActive(false));
+  byId("force").addEventListener("click", () => forceAll());
+  byId("reset").addEventListener("click", async () => {
+    writeForm(DEFAULTS);
+    await applyActive(true);
+  });
+  byId("reloadTabs").addEventListener("click", async () => {
     const tabs = await getYouTubeTabs();
-    for (const tab of tabs) {
-      try { await chrome.tabs.reload(tab.id, { bypassCache: true }); } catch {}
-    }
+    for (const tab of tabs) await chrome.tabs.reload(tab.id, { bypassCache: true }).catch(() => null);
     setMsg(`Reloaded ${tabs.length} tab(s).`);
   });
-  qs("scan")?.addEventListener("click", async () => {
+  byId("scan").addEventListener("click", async () => {
     const tabs = await getYouTubeTabs();
     let ok = 0;
     for (const tab of tabs) {
-      const res = await send(tab.id, { type: "YT_IAP_SCAN" });
+      const res = await send(tab.id, { type: "YT_FOCUS_COMBO_SCAN" });
       if (res.ok) ok++;
     }
     setMsg(`Anti-pause scan ${ok}/${tabs.length} tab(s).`);
   });
-  qs("syncColors")?.addEventListener("click", () => { syncColors(); queueLive(); });
-  qs("clearWallpaper")?.addEventListener("click", async () => {
-    const settings = read();
-    settings.wallpaperEnabled = false;
-    settings.wallpaperUrl = "";
-    settings.wallpaperDataUrl = "";
-    settings.wallpaperName = "";
-    write(settings);
+  byId("syncColors").addEventListener("click", () => {
+    syncColors();
+    queueLive();
+  });
+  byId("clearWallpaper").addEventListener("click", async () => {
+    const settings = readForm();
+    Object.assign(settings, { wallpaperEnabled: false, wallpaperUrl: "", wallpaperDataUrl: "", wallpaperName: "" });
+    writeForm(settings);
     await applyActive(false);
   });
-  el.wallpaperFile?.addEventListener("change", async () => {
+  el.wallpaperFile.addEventListener("change", async () => {
     const file = el.wallpaperFile.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) return setMsg("Invalid image.", true);
     try {
       setMsg("Processing wallpaper...");
-      const settings = read();
+      const settings = readForm();
       settings.wallpaperDataUrl = await compressImage(file);
       settings.wallpaperName = file.name;
       settings.wallpaperEnabled = true;
-      write(settings);
+      writeForm(settings);
       await applyActive(false);
       setMsg("Wallpaper applied.");
-    } catch (err) {
-      setMsg(err.message || "Wallpaper failed.", true);
+    } catch (error) {
+      setMsg(error?.message || "Wallpaper failed.", true);
     }
   });
-  el.theme?.addEventListener("change", () => {
+  el.theme.addEventListener("change", () => {
     syncColors();
-    if (el.customColors) el.customColors.checked = false;
+    el.customColors.checked = false;
     queueLive();
   });
-  el.customColors?.addEventListener("change", () => {
-    if (el.customColors.checked) syncColors();
-    queueLive();
-  });
-  for (const node of Object.values(el)) {
-    if (!node || node.id === "theme" || node.id === "customColors") continue;
+  el.customColors.addEventListener("change", queueLive);
+  for (const id of FIELD_IDS) {
+    const node = el[id];
+    if (!node || node === el.theme || node === el.customColors) continue;
     node.addEventListener("change", queueLive);
-    if (node.type === "range" || node.tagName === "TEXTAREA" || node.type === "color") node.addEventListener("input", queueLive);
+    if (node.type === "range" || node.type === "color" || node.tagName === "TEXTAREA") node.addEventListener("input", queueLive);
   }
 }
 
+async function loadSettings() {
+  const data = await chrome.storage.local.get({ [STORAGE_KEY]: null, [OLD_STORAGE_KEY]: null });
+  const settings = normalize(data[STORAGE_KEY] || data[OLD_STORAGE_KEY] || DEFAULTS);
+  await chrome.storage.local.set({ [STORAGE_KEY]: settings }).catch(() => null);
+  return settings;
+}
+
 async function init() {
-  bootElements();
+  if (started) return;
+  started = true;
+  for (const id of FIELD_IDS) el[id] = byId(id);
+  el.msg = byId("msg");
+  el.statusDot = byId("statusDot");
+  el.wallpaperFile = byId("wallpaperFile");
+  el.wallpaperName = byId("wallpaperName");
   bindEvents();
-  const data = await chrome.storage.local.get({ [STORAGE_KEY]: DEFAULTS });
-  write(data[STORAGE_KEY] || DEFAULTS);
+  writeForm(await loadSettings());
   setMsg("Ready.");
 }
 

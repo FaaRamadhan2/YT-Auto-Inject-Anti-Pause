@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Inject Anti Pause",
-  "version": "12.3.0",
-  "description": "YouTube theme inject, focus mode, wallpaper, ad cleaner, and safe anti-pause. v12.3 popup playlist color fix.",
+  "name": "YouTube Focus Anti Pause Combo",
+  "version": "13.0.0",
+  "description": "Focus mode, YouTube theme injection, wallpaper, ad cleanup, and safe continue-watching clicker.",
   "permissions": [
-    "unlimitedStorage",
     "storage",
     "scripting",
-    "tabs"
+    "tabs",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://youtube.com/*",
@@ -15,7 +15,7 @@
     "https://music.youtube.com/*"
   ],
   "action": {
-    "default_title": "YouTube Inject Anti Pause",
+    "default_title": "YouTube Focus Combo",
     "default_popup": "popup.html"
   },
   "content_scripts": [
